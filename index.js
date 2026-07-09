@@ -4,9 +4,18 @@ const axios = require("axios");
 
 const bot = new Telegraf(process.env.BOT_TOKEN);
 
-// State sementara per chat, buat nyimpen pilihan lokasi/jam/cuaca/daftar tempat
-// antara langkah "/main" dan langkah "user milih nomor".
+// State percakapan per chat. Tetap disimpan supaya konteks nyambung:
+// user bisa lanjut milih nomor, minta list lain, rombak rundown, atau ganti lokasi.
 const userState = {};
+
+// Balas dengan Markdown; kalau gagal (mis. karakter aneh di nama tempat), fallback plain text.
+async function safeReply(ctx, text) {
+    try {
+        return await ctx.reply(text, { parse_mode: "Markdown" });
+    } catch (e) {
+        return ctx.reply(text);
+    }
+}
 
 async function callGemini(prompt) {
     const baseUrl = process.env.LLM_BASE_URL.replace(/\/$/, "");
@@ -37,10 +46,28 @@ async function callGemini(prompt) {
     throw new Error(`Semua model AI gagal. Detail: ${lastError?.message}`);
 }
 
-function parseJam(cleanText) {
+// Ambil objek JSON pertama dari teks LLM (buang fence / kalimat pembuka kalau ada).
+function extractJson(raw) {
+    if (!raw) return null;
+    let s = raw.replace(/```json/gi, "").replace(/```/g, "").trim();
+    const start = s.indexOf("{");
+    const end = s.lastIndexOf("}");
+    if (start === -1 || end === -1 || end < start) return null;
+    try {
+        return JSON.parse(s.slice(start, end + 1));
+    } catch (e) {
+        return null;
+    }
+}
+
+function titleCase(str) {
+    return str.replace(/\w\S*/g, w => w.charAt(0).toUpperCase() + w.slice(1));
+}
+
+function parseJam(cleanText, prev) {
     let lokasi = cleanText;
-    let jamMulai = "07:00";
-    let jamSelesai = "21:00";
+    let jamMulai = (prev && prev.jamMulai) || "07:00";
+    let jamSelesai = (prev && prev.jamSelesai) || "21:00";
 
     const matchJam = cleanText.match(/dari\s+jam\s+(\d+)\s*(siang|pagi|sore|malem)?\s+sampe\s+(\d+)\s*(siang|pagi|sore|malem)?/);
 
@@ -58,6 +85,9 @@ function parseJam(cleanText) {
         if ((ketSelesai === "siang" || ketSelesai === "sore" || ketSelesai === "malem") && angkaSelesai < 12) angkaSelesai += 12;
         jamSelesai = String(angkaSelesai).padStart(2, "0") + ":00";
     }
+
+    // Buang kata bantu di awal supaya nama lokasi lebih bersih
+    lokasi = lokasi.replace(/^(main|jalan|jalan-jalan|di|ke|sekitar|daerah|area)\s+/gi, "").trim() || cleanText;
 
     return { lokasi, jamMulai, jamSelesai };
 }
@@ -81,13 +111,17 @@ async function ambilCuaca(lokasi, jamMulai, jamSelesai) {
     return { weatherData, weatherContext };
 }
 
-// Minta LLM menghasilkan daftar tempat bernomor untuk dipilih user.
-async function generateDaftarTempat(lokasi, jamMulai, jamSelesai) {
+// Minta LLM menghasilkan daftar 10 tempat bernomor. exclude = tempat yang sudah pernah disarankan.
+async function generateDaftarTempat(lokasi, jamMulai, jamSelesai, exclude = []) {
+    const excludeText = exclude.length
+        ? `\nJANGAN sebutkan lagi tempat-tempat berikut karena sudah pernah disarankan (WAJIB kasih yang benar-benar baru dan berbeda):\n${exclude.map((t, i) => `${i + 1}. ${t}`).join("\n")}\n`
+        : "";
+
     const prompt = `
 Kamu adalah asisten penyusun rencana perjalanan harian yang paham betul tempat-tempat menarik di suatu daerah.
 
-Sebutkan 5 nama tempat spesifik (bisa tempat main, kuliner, cafe, atau taman) yang searah, logis, dan saling berdekatan di daerah "${lokasi}", cocok untuk agenda harian dari jam ${jamMulai} sampai ${jamSelesai}.
-
+Sebutkan 10 nama tempat spesifik (bisa tempat main, kuliner, cafe, atau taman) yang searah, logis, dan saling berdekatan di daerah "${lokasi}", cocok untuk agenda harian dari jam ${jamMulai} sampai ${jamSelesai}.
+${excludeText}
 ATURAN OUTPUT (WAJIB DIIKUTI):
 - Balas HANYA berupa daftar bernomor, satu tempat per baris.
 - Format tiap baris persis: "1. Nama Tempat" (nomor, titik, spasi, lalu nama tempat).
@@ -96,14 +130,12 @@ ATURAN OUTPUT (WAJIB DIIKUTI):
 Contoh format:
 1. Nama Tempat A
 2. Nama Tempat B
-3. Nama Tempat C
-4. Nama Tempat D
-5. Nama Tempat E
+...
+10. Nama Tempat J
 `;
 
     const raw = await callGemini(prompt);
 
-    // Ambil nama tempat dari tiap baris "N. Nama"
     const tempat = raw
         .split("\n")
         .map(l => l.trim())
@@ -116,145 +148,205 @@ Contoh format:
     return tempat;
 }
 
-// Minta LLM menyusun rundown berdasarkan tempat yang DIPILIH user.
-async function generateRundown(lokasi, jamMulai, jamSelesai, weatherContext, tempatDipilih) {
+// Minta LLM menyusun rundown (dalam bentuk JSON) berdasarkan tempat yang DIPILIH user.
+async function generateRundownData(lokasi, jamMulai, jamSelesai, weatherContext, tempatDipilih, hindariHujan) {
     const daftarDipilih = tempatDipilih.map((t, i) => `${i + 1}. ${t}`).join("\n");
 
+    const aturanHujan = hindariHujan
+        ? `\n- PENTING: Susun ulang jadwal agar aktivitas di area terbuka DIHINDARI pada jam dengan peluang hujan tinggi. Pada jam rawan hujan, tempatkan user di tempat indoor/terlindung.`
+        : "";
+
     const prompt = `
-Kamu adalah asisten penyusun rencana perjalanan harian (day-trip planner) yang sangat terstruktur, efisien, dan mahir dalam mencocokkan jadwal aktivitas dengan prakiraan cuaca lokal.
+Kamu adalah asisten penyusun rencana perjalanan harian (day-trip planner) yang sangat terstruktur dan efisien.
 
 User sudah BERADA di daerah: "${lokasi}" dan ingin menyusun agenda dari jam ${jamMulai} sampai ${jamSelesai}.
 
-User HANYA memilih tempat-tempat berikut. Rundown WAJIB hanya memakai tempat-tempat ini dan JANGAN menambahkan tempat lain di luar daftar:
+User HANYA memilih tempat-tempat berikut. Rundown WAJIB hanya memakai tempat-tempat ini dan JANGAN menambahkan tempat lain:
 ${daftarDipilih}
 
-Berikut adalah data mentah cuaca riil per jam dari API di lokasi tersebut pada rentang waktu yang diinginkan:
+Data mentah cuaca riil per jam:
 ${weatherContext}
 
-Tolong buatkan respon teks bersih (plain text) yang langsung masuk ke inti informasi tanpa kalimat pembuka, tanpa basa-basi, dan tanpa kesimpulan penutup di luar format. 
+ATURAN:
+- User SUDAH berada di lokasi. JANGAN buat aktivitas "perjalanan menuju...", "berangkat ke...", "tiba di lokasi", atau "sarapan di perjalanan". Rundown WAJIB langsung dimulai dari aktivitas di salah satu tempat pilihan tepat pada jam ${jamMulai}.
+- Terjemahkan semua istilah kondisi cuaca dari Bahasa Inggris ke Bahasa Indonesia baku (Sunny -> Cerah, Clear -> Cerah, Partly Cloudy -> Berawan Sebagian, Cloudy -> Berawan, Overcast -> Mendung, Mist -> Berkabut, Patchy rain nearby -> Hujan Ringan di Sekitar, Light rain -> Hujan Ringan, Moderate rain -> Hujan Sedang, Heavy rain -> Hujan Lebat, Thundery outbreaks -> Berpotensi Petir).${aturanHujan}
 
-⚠️ ATURAN GAYA BAHASA & FORMAT:
-1. JANGAN gunakan kata sapaan atau panggilan seperti "bro", "lu", "gua", "sobat", atau sejenisnya. Gunakan bahasa yang netral, santai namun tetap sopan dan jelas.
-2. JANGAN tulis kalimat basa-basi di awal seperti "Waduh siap bro, ini gua bikinin...", "Cekidot", atau "Berikut adalah rencana...". Langsung mulai dari simbol pembuka (📍).
-3. JANGAN gunakan format markdown tebal ganda seperti **text**. WAJIB hanya menggunakan single asterik (*) untuk membuat teks miring/penekanan atau heading (Contoh: *Rekomendasi Tempat:* atau _Teks_).
-4. Teks rundown harus dibuat bersih agar mudah di-copy-paste oleh user ke grup chat mereka.
-5. User SUDAH berada di lokasi. JANGAN masukkan aktivitas "perjalanan menuju...", "berangkat ke...", "tiba di lokasi", atau sarapan di perjalanan. Rundown WAJIB langsung dimulai dari aktivitas di salah satu tempat pilihan tepat pada jam ${jamMulai}.
-
-Silakan susun struktur respon secara persis mengikuti format di bawah ini:
-
-📍 *Rekomendasi Tempat:*
-[Tuliskan ulang tempat-tempat yang sudah dipilih user di atas]
-
-📝 *Rundown Acara (Tinggal Copy):*
-[Buat daftar lini masa atau rundown per jam yang logis dan efisien dimulai tepat dari jam ${jamMulai} sampai jam ${jamSelesai}, hanya memakai tempat-tempat pilihan di atas]
-
-⚠️ *Pantauan Cuaca & Info Hujan:*
-[Tuliskan daftar kondisi cuaca per jam berdasarkan data mentah yang diberikan di atas. WAJIB menerjemahkan semua istilah kondisi cuaca dari Bahasa Inggris ke Bahasa Indonesia yang baku dan mudah dipahami (Contoh: Sunny -> Cerah, Patchy rain nearby -> Hujan ringan di sekitar, Overcast -> Mendung, Clear -> Cerah). WAJIB sertakan angka persentase peluang hujan dan perkiraan suhu dalam derajat Celcius (°C) di setiap jamnya. Di bagian bawah daftar jam, berikan kesimpulan singkat 1 kalimat apakah udara di rentang waktu tersebut cenderung terik/panas atau adem/sejuk]
-
-💬 *Opsi:*
-Mau merombak rundown ini agar otomatis menghindari jam rawan hujan, atau sudah oke?
+Balas HANYA dengan JSON valid (tanpa teks lain, tanpa markdown fence) dengan struktur PERSIS:
+{
+  "rekomendasi": ["Nama tempat yang dipakai", "..."],
+  "rundown": [
+    { "waktu": "07:00 - 11:00", "tempat": "Nama Tempat", "aktivitas": ["kegiatan 1", "kegiatan 2"] }
+  ],
+  "cuaca": [
+    { "jam": "12:00", "kondisi": "Cerah", "hujan": 2, "suhu": 32 }
+  ],
+  "kesimpulan": "Satu kalimat: udara cenderung terik/panas atau adem/sejuk di rentang waktu tersebut."
+}
 `;
 
-    return callGemini(prompt);
+    const raw = await callGemini(prompt);
+    return extractJson(raw);
 }
 
-bot.start((ctx) => {
-    ctx.reply("👋 Halo! Ketik perintahnya seperti ini untuk mulai bikin rencana main:\n\n" +
-              "`/main cileungsi dari jam 12 siang sampe 8 malem`\n\n" +
-              "Nanti aku kasih daftar pilihan tempat dulu, tinggal balas nomornya (contoh: `1 3 4`), baru aku susun rundown-nya.", { parse_mode: "Markdown" });
-});
+// Rakit pesan rundown final. Bagian rundown dibungkus code block (monospace) biar gampang di-copy.
+function formatRundownMessage(lokasi, data) {
+    let msg = `🗺️ *Rencana main di sekitar ${titleCase(lokasi)}*\n`;
+    msg += `━━━━━━━━━━━━━━━━━━━━\n\n`;
 
-bot.command("main", async (ctx) => {
-    const cleanText = ctx.message.text.replace("/main", "").trim().toLowerCase();
+    msg += `📍 *Rekomendasi Tempat:*\n`;
+    (data.rekomendasi || []).forEach((t, i) => { msg += `${i + 1}. ${t}\n`; });
+    msg += `\n`;
 
-    if (!cleanText) {
-        return ctx.reply("⚠️ *Format Salah!*\nContoh: `/main sekitar cileungsi dari jam 12 siang sampe 8 malem`", { parse_mode: "Markdown" });
-    }
+    msg += `📝 *Rundown Acara:*\n`;
+    let block = "";
+    (data.rundown || []).forEach(item => {
+        const tempat = item.tempat ? ` | ${item.tempat}` : "";
+        block += `${item.waktu}${tempat}\n`;
+        (item.aktivitas || []).forEach(a => { block += `   - ${a}\n`; });
+    });
+    msg += "```\n" + block.trim() + "\n```\n\n";
 
-    const { lokasi, jamMulai, jamSelesai } = parseJam(cleanText);
+    msg += `⚠️ *Pantauan Cuaca & Info Hujan:*\n`;
+    (data.cuaca || []).forEach(c => {
+        msg += `- Jam ${c.jam}: ${c.kondisi} (Peluang Hujan: ${c.hujan}%, Suhu: ${c.suhu}°C)\n`;
+    });
+    if (data.kesimpulan) msg += `\n${data.kesimpulan}\n`;
 
-    await ctx.reply(`🗺️ Nyari pilihan tempat di *${lokasi}* (${jamMulai} - ${jamSelesai}) & cek langit dulu ya...`, { parse_mode: "Markdown" });
+    msg += `\n💬 *Opsi:*\n`;
+    msg += `Ketik *rombak* biar aku atur ulang jadwal menghindari jam rawan hujan, *lain* buat minta list tempat lain, atau *oke* kalau sudah pas.`;
+
+    return msg;
+}
+
+// ==== Langkah 1: user minta lokasi (via /main ATAU langsung ketik lokasinya) ====
+async function handleLokasiRequest(ctx, cleanText) {
+    const prev = userState[ctx.chat.id];
+    const { lokasi, jamMulai, jamSelesai } = parseJam(cleanText, prev);
+
+    await safeReply(ctx, `🗺️ Nyari pilihan tempat di *${titleCase(lokasi)}* (${jamMulai} - ${jamSelesai}) & cek langit dulu ya...`);
 
     try {
-        const { weatherData, weatherContext } = await ambilCuaca(lokasi, jamMulai, jamSelesai);
+        const { weatherContext } = await ambilCuaca(lokasi, jamMulai, jamSelesai);
         const daftarTempat = await generateDaftarTempat(lokasi, jamMulai, jamSelesai);
 
         if (!daftarTempat.length) {
-            return ctx.reply("❌ Gagal menyusun daftar tempat. Coba ulangi lagi ya.");
+            return safeReply(ctx, "❌ Gagal menyusun daftar tempat. Coba ulangi lagi ya.");
         }
 
-        // Simpan state buat langkah berikutnya
         userState[ctx.chat.id] = {
             lokasi,
             jamMulai,
             jamSelesai,
             weatherContext,
-            namaLokasi: weatherData.location.name,
-            daftarTempat
+            daftarTempat,
+            tempatDisarankan: [...daftarTempat],
+            tempatDipilih: null
         };
 
-        let msg = `📍 *Pilihan Tempat di ${weatherData.location.name.toUpperCase()}*\n`;
-        msg += `━━━━━━━━━━━━━━━━━━━━\n`;
-        daftarTempat.forEach((t, i) => {
-            msg += `${i + 1}. ${t}\n`;
-        });
-        msg += `\nBalas dengan nomor tempat yang kamu mau (bisa lebih dari satu).\n`;
-        msg += `Contoh: *1 3 4* atau cukup *1*`;
-
-        return ctx.reply(msg, { parse_mode: "Markdown" });
-
+        return kirimDaftarTempat(ctx, lokasi, daftarTempat);
     } catch (err) {
         console.error(err);
-        return ctx.reply("❌ Gagal memproses rencana main. Pastikan nama lokasinya benar ya.");
+        return safeReply(ctx, "❌ Gagal memproses rencana main. Pastikan nama lokasinya benar ya.");
     }
-});
+}
 
-// Langkah 2: user balas dengan nomor pilihan tempat
-bot.on("text", async (ctx) => {
-    const text = ctx.message.text.trim();
+function kirimDaftarTempat(ctx, lokasi, daftarTempat) {
+    let msg = `📍 *Pilihan Tempat di sekitar ${titleCase(lokasi)}*\n`;
+    msg += `━━━━━━━━━━━━━━━━━━━━\n`;
+    daftarTempat.forEach((t, i) => { msg += `${i + 1}. ${t}\n`; });
+    msg += `\nBalas dengan nomor tempat yang kamu mau (bisa lebih dari satu).\n`;
+    msg += `Contoh: *1 3 4* atau cukup *1*.\n`;
+    msg += `Kurang cocok? Ketik *lain* biar aku kasih pilihan tempat yang beda.`;
+    return safeReply(ctx, msg);
+}
 
-    // Abaikan command (misal /main, /start) — sudah ditangani handler lain
-    if (text.startsWith("/")) return;
-
-    const state = userState[ctx.chat.id];
-    if (!state) {
-        return ctx.reply("Mulai dulu dengan perintah, contoh:\n`/main cileungsi dari jam 12 siang sampe 8 malem`", { parse_mode: "Markdown" });
-    }
-
-    // Ambil semua angka yang diketik user
-    const nomor = (text.match(/\d+/g) || []).map(n => parseInt(n));
-    const validNomor = [...new Set(nomor)].filter(n => n >= 1 && n <= state.daftarTempat.length);
-
-    if (!validNomor.length) {
-        return ctx.reply(`⚠️ Nomor tidak valid. Pilih antara 1 sampai ${state.daftarTempat.length}, contoh: *1 3*`, { parse_mode: "Markdown" });
-    }
-
-    const tempatDipilih = validNomor.map(n => state.daftarTempat[n - 1]);
-
-    await ctx.reply(`✍️ Oke, aku susun rundown pakai: *${tempatDipilih.join(", ")}*...`, { parse_mode: "Markdown" });
+// ==== Susun rundown dari tempat yang dipilih ====
+async function buatRundown(ctx, state, tempatDipilih, hindariHujan) {
+    const info = hindariHujan ? " (dirombak biar hindari jam hujan)" : "";
+    await safeReply(ctx, `✍️ Oke, aku susun rundown pakai: *${tempatDipilih.join(", ")}*${info}...`);
 
     try {
-        const aiResponse = await generateRundown(
-            state.lokasi,
-            state.jamMulai,
-            state.jamSelesai,
-            state.weatherContext,
-            tempatDipilih
+        const data = await generateRundownData(
+            state.lokasi, state.jamMulai, state.jamSelesai,
+            state.weatherContext, tempatDipilih, hindariHujan
         );
 
-        let msg = `🗺️ *RENCANA JALAN-JALAN DI ${state.namaLokasi.toUpperCase()}*\n`;
-        msg += `━━━━━━━━━━━━━━━━━━━━\n\n`;
-        msg += aiResponse;
+        if (!data || !data.rundown) {
+            return safeReply(ctx, "❌ Gagal menyusun rundown. Coba lagi ya.");
+        }
 
-        // Rundown selesai, state boleh dibuang
-        delete userState[ctx.chat.id];
-
-        return ctx.reply(msg, { parse_mode: "Markdown" });
-
+        state.tempatDipilih = tempatDipilih;
+        return safeReply(ctx, formatRundownMessage(state.lokasi, data));
     } catch (err) {
         console.error(err);
-        return ctx.reply("❌ Gagal menyusun rundown. Coba lagi ya.");
+        return safeReply(ctx, "❌ Gagal menyusun rundown. Coba lagi ya.");
     }
+}
+
+bot.start((ctx) => {
+    ctx.reply("👋 Halo! Sebutin aja lokasinya, contoh:\n\n" +
+              "`cileungsi dari jam 12 siang sampe 8 malem`\n\n" +
+              "Nanti aku kasih 10 pilihan tempat dulu. Tinggal balas nomornya (contoh: `1 3 4`), baru aku susun rundown-nya. " +
+              "Kurang suka listnya? Ketik `lain`. Gak perlu pakai `/main` kok.", { parse_mode: "Markdown" });
+});
+
+// Tetap dukung /main biar kompatibel
+bot.command("main", async (ctx) => {
+    const cleanText = ctx.message.text.replace("/main", "").trim().toLowerCase();
+    if (!cleanText) {
+        return safeReply(ctx, "⚠️ *Format:* `cileungsi dari jam 12 siang sampe 8 malem`");
+    }
+    return handleLokasiRequest(ctx, cleanText);
+});
+
+// Router utama: tangani semua teks biasa secara "spontan" tanpa perlu command.
+bot.on("text", async (ctx) => {
+    const raw = ctx.message.text.trim();
+    if (raw.startsWith("/")) return; // command lain sudah ditangani
+
+    const text = raw.toLowerCase();
+    const state = userState[ctx.chat.id];
+
+    // Affirmasi / basa-basi
+    if (/^(oke|ok|okay|sip|mantap|makasih|terima kasih|thanks|thank you|gas|siap|cukup)\b/.test(text)) {
+        return safeReply(ctx, "👍 Siap, selamat jalan-jalan! Kalau mau rencana lokasi lain tinggal sebutin aja.");
+    }
+
+    if (state && state.daftarTempat && state.daftarTempat.length) {
+        // Minta list tempat lain
+        if (/(lain|ganti|yang lain|kurang suka|nggak suka|ga suka|gak suka|opsi lain|saran lain|acak|refresh)/.test(text)) {
+            await safeReply(ctx, "🔄 Oke, aku cariin pilihan tempat yang beda...");
+            try {
+                const baru = await generateDaftarTempat(state.lokasi, state.jamMulai, state.jamSelesai, state.tempatDisarankan);
+                if (!baru.length) return safeReply(ctx, "❌ Gagal cari tempat lain. Coba lagi ya.");
+                state.daftarTempat = baru;
+                state.tempatDisarankan = [...state.tempatDisarankan, ...baru];
+                return kirimDaftarTempat(ctx, state.lokasi, baru);
+            } catch (err) {
+                console.error(err);
+                return safeReply(ctx, "❌ Gagal cari tempat lain. Coba lagi ya.");
+            }
+        }
+
+        // Rombak rundown biar hindari hujan (butuh pilihan tempat sebelumnya)
+        if (state.tempatDipilih && /(rombak|hindari|rawan|atur ulang|geser|ubah jam)/.test(text)) {
+            return buatRundown(ctx, state, state.tempatDipilih, true);
+        }
+
+        // Pilih nomor tempat
+        if (/^[\d\s,.]+$/.test(text)) {
+            const nomor = (text.match(/\d+/g) || []).map(n => parseInt(n));
+            const validNomor = [...new Set(nomor)].filter(n => n >= 1 && n <= state.daftarTempat.length);
+            if (!validNomor.length) {
+                return safeReply(ctx, `⚠️ Nomor tidak valid. Pilih antara 1 sampai ${state.daftarTempat.length}, contoh: *1 3*`);
+            }
+            const tempatDipilih = validNomor.map(n => state.daftarTempat[n - 1]);
+            return buatRundown(ctx, state, tempatDipilih, false);
+        }
+    }
+
+    // Selain itu: anggap ini permintaan lokasi baru
+    return handleLokasiRequest(ctx, text);
 });
 
 bot.launch().then(() => {
