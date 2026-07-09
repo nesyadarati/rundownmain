@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Dashboard Rencana Main & Cuaca</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+<div class="app">
+    <header class="topbar no-print">
+        <h1>🗺️ Dashboard Rencana Main</h1>
+        <p>Susun rencana, edit teksnya, tempel foto tempat sendiri, lalu simpan jadi PDF.</p>
+    </header>
+
+    <!-- STEP 1 -->
+    <section class="card no-print">
+        <h2>1. Cari Tempat</h2>
+        <label>Lokasi & jam</label>
+        <input id="inputLokasi" type="text" placeholder="cileungsi dari jam 12 siang sampe 8 malem" />
+        <div class="row">
+            <button id="btnCari" class="primary">Cari 10 Tempat</button>
+            <button id="btnLain" class="ghost" disabled>Kasih Tempat Lain</button>
+        </div>
+        <div id="status" class="status"></div>
+    </section>
+
+    <!-- STEP 2 -->
+    <section id="panelPilih" class="card no-print hidden">
+        <h2>2. Pilih Tempat</h2>
+        <div id="daftarTempat" class="places"></div>
+        <label class="check">
+            <input type="checkbox" id="hindariHujan" /> Hindari jam rawan hujan
+        </label>
+        <button id="btnRundown" class="primary">Susun Rundown</button>
+    </section>
+
+    <!-- HASIL (printable) -->
+    <section id="panelHasil" class="card hidden">
+        <div class="row no-print" style="justify-content: space-between;">
+            <h2>3. Hasil <span class="hint">(klik teks buat edit)</span></h2>
+            <button id="btnPdf" class="primary">🖨️ Simpan / Cetak PDF</button>
+        </div>
+
+        <div id="hasil" class="hasil">
+            <h1 id="judul" contenteditable="true">Rencana Main</h1>
+
+            <h3>📍 Rekomendasi Tempat</h3>
+            <ol id="rekomendasi" contenteditable="true"></ol>
+
+            <h3>📝 Rundown Acara</h3>
+            <div id="rundown" class="mono" contenteditable="true"></div>
+
+            <h3>⚠️ Pantauan Cuaca & Info Hujan</h3>
+            <ul id="cuaca" contenteditable="true"></ul>
+            <p id="kesimpulan" class="kesimpulan" contenteditable="true"></p>
+
+            <h3>🖼️ Foto Tempat</h3>
+            <p class="hint no-print">Klik salah satu galeri lalu tekan <b>Ctrl+V</b> untuk menempel screenshot, atau pakai tombol Upload.</p>
+            <div id="galeri"></div>
+        </div>
+    </section>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>

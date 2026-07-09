@@ -14,8 +14,25 @@ Bot Telegram penyusun rencana main harian yang mencocokkan jadwal aktivitas deng
 ```bash
 npm install
 cp .env.example .env   # lalu isi nilainya
-node index.js
+node index.js          # jalankan bot Telegram
 ```
+
+## Dashboard Lokal
+
+Selain bot, ada dashboard web buat menyusun rencana, mengedit hasilnya, menempel/upload foto tempat sendiri, lalu export ke PDF.
+
+```bash
+npm run dashboard      # atau: node server.js
+```
+
+Buka `http://localhost:3000`. Alurnya:
+
+1. Ketik lokasi (mis. `cileungsi dari jam 12 siang sampe 8 malem`) → **Cari 10 Tempat**. Tombol **Kasih Tempat Lain** buat minta daftar berbeda.
+2. Centang tempat yang diinginkan (opsional: **Hindari jam rawan hujan**) → **Susun Rundown**.
+3. Semua teks bisa diklik & diedit langsung. Di bagian **Foto Tempat**, klik galeri lalu **Ctrl+V** untuk menempel screenshot, atau **Upload Foto** dari file.
+4. **Simpan / Cetak PDF** buat export hasil (pilih *Save as PDF* di dialog cetak).
+
+Logika inti (LLM, cuaca, daftar tempat, rundown) dipakai bersama oleh bot dan dashboard lewat `planner.js`. Port dashboard bisa diatur via `DASHBOARD_PORT`.
 
 ## Environment Variables
 
