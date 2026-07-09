@@ -27,9 +27,18 @@ function mapsUrl(q) {
     return "https://www.google.com/maps/search/?api=1&query=" + encodeURIComponent(q);
 }
 
+function mapsQuery(nama) {
+    const loc = (ctx.lokasi || "").trim();
+    const n = String(nama).trim();
+    if (!loc) return n;
+    if (!n) return loc;
+    // Hindari duplikasi: kalau nama tempat udah mengandung nama lokasi, jangan ditambah lagi.
+    if (n.toLowerCase().includes(loc.toLowerCase())) return n;
+    return `${n}, ${loc}`;
+}
+
 function mapsLink(nama, teks) {
-    const q = ctx.lokasi ? `${nama} ${ctx.lokasi}` : nama;
-    return `<a class="maps-link" href="${mapsUrl(q)}" target="_blank" rel="noopener">📍 ${teks || "Buka di Google Maps"}</a>`;
+    return `<a class="maps-link" href="${mapsUrl(mapsQuery(nama))}" target="_blank" rel="noopener">📍 ${teks || "Buka di Google Maps"}</a>`;
 }
 
 // ikon kategori dari nama tempat
