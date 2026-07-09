@@ -10,7 +10,13 @@ const {
 
 const app = express();
 app.use(express.json({ limit: "2mb" }));
-app.use(express.static(path.join(__dirname, "public")));
+
+// Serve file statis dashboard (dari root repo, sama seperti di Vercel).
+["index.html", "app.js", "style.css"].forEach((f) => {
+    app.get(f === "index.html" ? "/" : "/" + f, (req, res) =>
+        res.sendFile(path.join(__dirname, f))
+    );
+});
 
 // Ambil cuaca + daftar 10 tempat. Bisa kirim `exclude` buat minta tempat lain.
 app.post("/api/places", async (req, res) => {
