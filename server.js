@@ -59,7 +59,7 @@ app.post("/api/rundown", async (req, res) => {
     }
 });
 
-const PORT = process.env.DASHBOARD_PORT || 3000;
+const PORT = process.env.PORT || process.env.DASHBOARD_PORT || 3000;
 app.listen(PORT, () => {
     console.log(`🖥️  Dashboard jalan di http://localhost:${PORT}`);
 });
