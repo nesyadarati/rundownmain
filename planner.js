@@ -49,40 +49,115 @@ function titleCase(str) {
     return String(str).replace(/\w\S*/g, w => w.charAt(0).toUpperCase() + w.slice(1));
 }
 
+// Ubah angka + keterangan (siang/malam/am/pm) jadi jam 24 jam.
+function to24(jam, menit, ket) {
+    let h = parseInt(jam, 10);
+    const m = menit ? String(menit).padStart(2, "0") : "00";
+    ket = (ket || "").toLowerCase();
+
+    if (ket === "pm") {
+        if (h < 12) h += 12;
+    } else if (ket === "am") {
+        if (h === 12) h = 0;
+    } else if (ket === "pagi") {
+        if (h === 12) h = 0;
+    } else if (ket === "siang" || ket === "sore" || ket === "malam" || ket === "malem") {
+        if (h < 12) h += 12;
+    }
+    if (h > 23) h = 23;
+    return String(h).padStart(2, "0") + ":" + m;
+}
+
+// Ubah "16/7/26" / "16-7-2026" jadi ISO "YYYY-MM-DD".
+function normalisasiTanggal(d, mo, y) {
+    const day = parseInt(d, 10);
+    const month = parseInt(mo, 10);
+    let year;
+    if (y) {
+        year = parseInt(y, 10);
+        if (year < 100) year += 2000;
+    } else {
+        year = new Date().getFullYear();
+    }
+    if (month < 1 || month > 12 || day < 1 || day > 31) return null;
+    return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
 function parseJam(cleanText, prev) {
     let lokasi = cleanText;
     let jamMulai = (prev && prev.jamMulai) || "07:00";
     let jamSelesai = (prev && prev.jamSelesai) || "21:00";
+    let tanggal = (prev && prev.tanggal) || null;
 
-    const matchJam = cleanText.match(/dari\s+jam\s+(\d+)\s*(siang|pagi|sore|malem)?\s+sampe\s+(\d+)\s*(siang|pagi|sore|malem)?/);
+    const ket = "(pagi|siang|sore|malam|malem|am|pm)";
+    const num = "(\\d{1,2})(?:[.:](\\d{2}))?";
+    const sep = "(?:sampai|sampe|hingga|s\\/d|sd|s\\.d|-|–|—|ke)";
+    const rangeRe = new RegExp(
+        `(?:dari\\s+)?jam\\s*${num}\\s*${ket}?\\s*${sep}\\s*(?:jam\\s*)?${num}\\s*${ket}?`,
+        "i"
+    );
 
-    if (matchJam) {
-        lokasi = cleanText.split("dari jam")[0].trim();
-
-        let angkaMulai = parseInt(matchJam[1]);
-        const ketMulai = matchJam[2];
-        let angkaSelesai = parseInt(matchJam[3]);
-        const ketSelesai = matchJam[4];
-
-        if ((ketMulai === "siang" || ketMulai === "sore" || ketMulai === "malem") && angkaMulai < 12) angkaMulai += 12;
-        jamMulai = String(angkaMulai).padStart(2, "0") + ":00";
-
-        if ((ketSelesai === "siang" || ketSelesai === "sore" || ketSelesai === "malem") && angkaSelesai < 12) angkaSelesai += 12;
-        jamSelesai = String(angkaSelesai).padStart(2, "0") + ":00";
+    const mJam = cleanText.match(rangeRe);
+    if (mJam) {
+        jamMulai = to24(mJam[1], mJam[2], mJam[3]);
+        jamSelesai = to24(mJam[4], mJam[5], mJam[6]);
+        lokasi = lokasi.replace(mJam[0], " ");
     }
 
-    lokasi = lokasi.replace(/^(main|jalan|jalan-jalan|di|ke|sekitar|daerah|area)\s+/gi, "").trim() || cleanText;
+    // Tanggal: "tanggal 16/7/26" atau angka "16/7/2026" / "16-7".
+    const dateRe = /(?:tanggal|tgl|tgl\.|pada)?\s*\b(\d{1,2})[\/\-](\d{1,2})(?:[\/\-](\d{2,4}))?\b/i;
+    const mTgl = cleanText.match(dateRe);
+    if (mTgl) {
+        const iso = normalisasiTanggal(mTgl[1], mTgl[2], mTgl[3]);
+        if (iso) {
+            tanggal = iso;
+            lokasi = lokasi.replace(mTgl[0], " ");
+        }
+    }
 
-    return { lokasi, jamMulai, jamSelesai };
+    // Bersihin sisa kata kunci waktu/tanggal + prefix umum dari nama lokasi.
+    lokasi = lokasi
+        .replace(/\b(tanggal|tgl|tgl\.|pada|dari|jam|pukul)\b/gi, " ")
+        .replace(/^(main|jalan|jalan-jalan|di|ke|sekitar|daerah|area)\s+/gi, " ")
+        .replace(/\s{2,}/g, " ")
+        .trim();
+
+    if (!lokasi) lokasi = cleanText;
+
+    return { lokasi, jamMulai, jamSelesai, tanggal };
 }
 
-async function ambilCuaca(lokasi, jamMulai, jamSelesai) {
+async function ambilCuaca(lokasi, jamMulai, jamSelesai, tanggal) {
     const apiKey = process.env.WEATHER_API_KEY;
-    const weatherUrl = `http://api.weatherapi.com/v1/forecast.json?key=${apiKey}&q=${encodeURIComponent(lokasi)}&days=1&aqi=no&alerts=no`;
+    let peringatan = null;
+
+    // Tentukan jarak hari dari hari ini (0 = hari ini).
+    let diffHari = 0;
+    if (tanggal) {
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const target = new Date(tanggal + "T00:00:00");
+        diffHari = Math.round((target - today) / 86400000);
+    }
+
+    // WeatherAPI paket gratis: prakiraan cuma sampai ~3 hari ke depan (hari ini + 2).
+    if (diffHari < 0) {
+        peringatan = "Tanggalnya sudah lewat, jadi dipakai prakiraan hari ini. Ganti ke tanggal yang belum lewat kalau mau data akurat.";
+        diffHari = 0;
+        tanggal = null;
+    } else if (diffHari > 2) {
+        peringatan = "Prakiraan cuaca per jam nggak tersedia untuk tanggal itu (di luar jangkauan ~3 hari API gratis). Rundown tetap dibuat, tapi tanpa data cuaca detail.";
+        return { weatherData: null, weatherContext: "", cuacaList: [], peringatan };
+    }
+
+    let weatherUrl = `http://api.weatherapi.com/v1/forecast.json?key=${apiKey}&q=${encodeURIComponent(lokasi)}&days=3&aqi=no&alerts=no`;
+    if (tanggal) weatherUrl += `&dt=${tanggal}`;
 
     const weatherRes = await axios.get(weatherUrl);
     const weatherData = weatherRes.data;
-    const hours = weatherData.forecast.forecastday[0].hour;
+    const forecastDays = weatherData.forecast.forecastday;
+    const dayData = (tanggal && forecastDays.find(d => d.date === tanggal)) || forecastDays[0];
+    const hours = dayData.hour;
 
     let weatherContext = "";
     const cuacaList = [];
@@ -94,7 +169,7 @@ async function ambilCuaca(lokasi, jamMulai, jamSelesai) {
         }
     });
 
-    return { weatherData, weatherContext, cuacaList };
+    return { weatherData, weatherContext, cuacaList, peringatan };
 }
 
 // Daftar 10 tempat bernomor. exclude = tempat yang sudah pernah disarankan.

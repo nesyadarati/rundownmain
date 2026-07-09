@@ -56,22 +56,25 @@ function formatRundownMessage(lokasi, data) {
 // ==== Langkah 1: user minta lokasi (via /main ATAU langsung ketik lokasinya) ====
 async function handleLokasiRequest(ctx, cleanText) {
     const prev = userState[ctx.chat.id];
-    const { lokasi, jamMulai, jamSelesai } = parseJam(cleanText, prev);
+    const { lokasi, jamMulai, jamSelesai, tanggal } = parseJam(cleanText, prev);
 
     await safeReply(ctx, `🗺️ Nyari pilihan tempat di *${titleCase(lokasi)}* (${jamMulai} - ${jamSelesai}) & cek langit dulu ya...`);
 
     try {
-        const { weatherContext } = await ambilCuaca(lokasi, jamMulai, jamSelesai);
+        const { weatherContext, peringatan } = await ambilCuaca(lokasi, jamMulai, jamSelesai, tanggal);
         const daftarTempat = await generateDaftarTempat(lokasi, jamMulai, jamSelesai);
 
         if (!daftarTempat.length) {
             return safeReply(ctx, "❌ Gagal menyusun daftar tempat. Coba ulangi lagi ya.");
         }
 
+        if (peringatan) await safeReply(ctx, `⚠️ ${peringatan}`);
+
         userState[ctx.chat.id] = {
             lokasi,
             jamMulai,
             jamSelesai,
+            tanggal,
             weatherContext,
             daftarTempat,
             tempatDisarankan: [...daftarTempat],

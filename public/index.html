@@ -4,46 +4,66 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Dashboard Rencana Main & Cuaca</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
 <link rel="stylesheet" href="style.css" />
 </head>
 <body>
 <div class="app">
     <header class="topbar no-print">
-        <h1>🗺️ Dashboard Rencana Main</h1>
-        <p>Susun rencana, edit teksnya, tempel foto tempat sendiri, lalu simpan jadi PDF.</p>
+        <div class="brand">
+            <div class="logo">🗺️</div>
+            <div>
+                <h1>Dashboard Rencana Main</h1>
+                <p>Susun rencana, edit teksnya, tempel foto sendiri, lalu simpan jadi PDF.</p>
+            </div>
+        </div>
+        <button id="btnTheme" class="theme-toggle" title="Ganti tema terang/gelap" aria-label="Ganti tema">🌙</button>
     </header>
 
     <!-- STEP 1 -->
     <section class="card no-print">
-        <h2>1. Cari Tempat</h2>
-        <label>Lokasi & jam</label>
-        <input id="inputLokasi" type="text" placeholder="cileungsi dari jam 12 siang sampe 8 malem" />
+        <h2><span class="step">1</span> Cari Tempat</h2>
+        <label>Lokasi, jam & tanggal</label>
+        <input id="inputLokasi" type="text" placeholder="cileungsi jam 1 siang sampai 7 malam tanggal 16/7" />
+        <p class="hint">Contoh: <i>kayuringin jam 1 siang sampai 7 malam tanggal 16/7</i> · tanggal & jam opsional (default 07:00–21:00).</p>
         <div class="row">
-            <button id="btnCari" class="primary">Cari 10 Tempat</button>
-            <button id="btnLain" class="ghost" disabled>Kasih Tempat Lain</button>
+            <button id="btnCari" class="primary">🔍 Cari 10 Tempat</button>
+            <button id="btnLain" class="ghost" disabled>🔄 Kasih Tempat Lain</button>
+            <button id="btnReset" class="danger" disabled>🗑️ Reset</button>
         </div>
         <div id="status" class="status"></div>
+        <div id="peringatan" class="warn hidden"></div>
     </section>
 
     <!-- STEP 2 -->
     <section id="panelPilih" class="card no-print hidden">
-        <h2>2. Pilih Tempat</h2>
+        <h2><span class="step">2</span> Pilih Tempat</h2>
         <div id="daftarTempat" class="places"></div>
         <label class="check">
-            <input type="checkbox" id="hindariHujan" /> Hindari jam rawan hujan
+            <input type="checkbox" id="hindariHujan" /> ☔ Hindari jam rawan hujan
         </label>
-        <button id="btnRundown" class="primary">Susun Rundown</button>
+        <button id="btnRundown" class="primary block">📝 Susun Rundown</button>
     </section>
 
     <!-- HASIL (printable) -->
     <section id="panelHasil" class="card hidden">
-        <div class="row no-print" style="justify-content: space-between;">
-            <h2>3. Hasil <span class="hint">(klik teks buat edit)</span></h2>
-            <button id="btnPdf" class="primary">🖨️ Simpan / Cetak PDF</button>
+        <div class="row spread no-print">
+            <h2><span class="step">3</span> Hasil <span class="hint">(klik teks buat edit)</span></h2>
+            <div class="row">
+                <button id="btnSalin" class="ghost">📋 Salin Rundown</button>
+                <button id="btnPdf" class="primary">🖨️ Simpan / Cetak PDF</button>
+            </div>
         </div>
 
         <div id="hasil" class="hasil">
+            <div class="print-head print-only">
+                <span class="ph-logo">🗺️</span>
+                <span id="printTanggal" class="ph-date"></span>
+            </div>
+
             <h1 id="judul" contenteditable="true">Rencana Main</h1>
+            <p id="subJudul" class="sub"></p>
 
             <h3>📍 Rekomendasi Tempat</h3>
             <ol id="rekomendasi" contenteditable="true"></ol>
@@ -52,12 +72,15 @@
             <div id="rundown" class="mono" contenteditable="true"></div>
 
             <h3>⚠️ Pantauan Cuaca & Info Hujan</h3>
-            <ul id="cuaca" contenteditable="true"></ul>
+            <div id="cuaca" class="cuaca-grid"></div>
             <p id="kesimpulan" class="kesimpulan" contenteditable="true"></p>
+            <p id="mapsMain" class="maps-main no-print"></p>
 
             <h3>🖼️ Foto Tempat</h3>
             <p class="hint no-print">Klik salah satu galeri lalu tekan <b>Ctrl+V</b> untuk menempel screenshot, atau pakai tombol Upload.</p>
             <div id="galeri"></div>
+
+            <p class="print-foot print-only">Dibuat via Dashboard Rencana Main</p>
         </div>
     </section>
 </div>
