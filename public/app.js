@@ -7,7 +7,8 @@ let state = {
     cuacaList: [],
     daftarTempat: [],
     tempatDipilih: [],
-    exclude: []
+    exclude: [],
+    tempatManual: [] // Tempat yang ditambahkan manual via Google Maps
 };
 
 const placeEmojis = ['🏛️', '🍽️', '☕', '🌳', '🎨', '🎭', '🏖️', '🛍️', '🎪', '🏯'];
@@ -296,6 +297,173 @@ function showError(elementId, message) {
     el.classList.remove('hidden');
 }
 
+// Tambah tempat manual via Google Maps link
+async function tambahTempatManual() {
+    const input = document.getElementById('input-maps-link');
+    const url = input.value.trim();
+    
+    if (!url) {
+        showError('error-maps', 'Link Google Maps wajib diisi!');
+        return;
+    }
+    
+    hideElement('error-maps');
+    setLoading('btn-tambah-tempat', true);
+    
+    try {
+        const response = await fetch('/api/parse-maps', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ url: url })
+        });
+        
+        const data = await response.json();
+        
+        if (!response.ok) {
+            throw new Error(data.error || 'Gagal memproses link Google Maps');
+        }
+        
+        // Tambahkan ke daftar tempat manual
+        const tempatBaru = {
+            nama: data.nama,
+            mapsUrl: data.mapsUrl,
+            lat: data.lat,
+            lng: data.lng,
+            sumber: 'manual'
+        };
+        
+        state.tempatManual.push(tempatBaru);
+        input.value = '';
+        
+        // Render ulang daftar tempat manual
+        renderTempatManual();
+        
+    } catch (error) {
+        showError('error-maps', error.message);
+    } finally {
+        setLoading('btn-tambah-tempat', false);
+    }
+}
+
+// Render daftar tempat manual yang sudah ditambahkan
+function renderTempatManual() {
+    const container = document.getElementById('tempat-manual-list');
+    
+    if (state.tempatManual.length === 0) {
+        container.innerHTML = '';
+        return;
+    }
+    
+    container.innerHTML = `
+        <div style="font-size:.85rem;color:var(--text-secondary);margin-bottom:.5rem;font-weight:600;">
+            Tempat Manual (${state.tempatManual.length}):
+        </div>
+        ${state.tempatManual.map((t, idx) => `
+            <div style="display:flex;align-items:center;gap:.5rem;padding:.5rem;background:var(--bg-primary);border-radius:8px;margin-bottom:.5rem;">
+                <span style="flex:1;font-size:.9rem;">📍 ${t.nama}</span>
+                <a href="${t.mapsUrl}" target="_blank" style="color:var(--accent);text-decoration:none;font-size:.8rem;">🔗 Maps</a>
+                <button onclick="hapusTempatManual(${idx})" style="background:none;border:none;color:var(--error);cursor:pointer;font-size:1rem;padding:0 .25rem;">×</button>
+            </div>
+        `).join('')}
+    `;
+}
+
+// Hapus tempat manual
+function hapusTempatManual(idx) {
+    state.tempatManual.splice(idx, 1);
+    renderTempatManual();
+}
+
+// Override togglePlace untuk support tempat manual
+const originalTogglePlace = togglePlace;
+togglePlace = function(idx) {
+    const item = document.querySelector(`.place-item[data-idx="${idx}"]`);
+    const tempat = state.daftarTempat[idx];
+    
+    if (state.tempatDipilih.includes(tempat)) {
+        state.tempatDipilih = state.tempatDipilih.filter(t => t !== tempat);
+        item.classList.remove('selected');
+    } else {
+        state.tempatDipilih.push(tempat);
+        item.classList.add('selected');
+    }
+};
+
+// Tambah fungsi untuk toggle tempat manual
+function toggleTempatManual(idx) {
+    const item = document.querySelector(`.manual-place-item[data-idx="${idx}"]`);
+    const tempat = state.tempatManual[idx];
+    const namaTempat = tempat.nama;
+    
+    if (state.tempatDipilih.includes(namaTempat)) {
+        state.tempatDipilih = state.tempatDipilih.filter(t => t !== namaTempat);
+        item.classList.remove('selected');
+    } else {
+        state.tempatDipilih.push(namaTempat);
+        item.classList.add('selected');
+    }
+}
+
+// Override renderPlaces untuk include tempat manual
+const originalRenderPlaces = renderPlaces;
+renderPlaces = function() {
+    const grid = document.getElementById('places-grid');
+    const subtitle = document.getElementById('places-subtitle');
+    
+    subtitle.textContent = `${titleCase(state.lokasi)} • ${state.jamMulai} - ${state.jamSelesai}`;
+    
+    // Render tempat dari AI
+    let html = state.daftarTempat.map((tempat, idx) => `
+        <div class="place-item" onclick="togglePlace(${idx})" data-idx="${idx}">
+            <div class="checkbox"></div>
+            <span class="place-emoji">${placeEmojis[idx % 10]}</span>
+            <span class="place-name">${tempat}</span>
+        </div>
+    `).join('');
+    
+    // Render tempat manual jika ada
+    if (state.tempatManual.length > 0) {
+        html += `
+            <div style="grid-column:1/-1;margin-top:1rem;padding-top:1rem;border-top:1px solid var(--border);">
+                <div style="font-size:.85rem;color:var(--text-secondary);margin-bottom:.75rem;font-weight:600;">
+                    📍 Tempat Manual (${state.tempatManual.length})
+                </div>
+            </div>
+        `;
+        html += state.tempatManual.map((tempat, idx) => `
+            <div class="place-item manual-place-item" onclick="toggleTempatManual(${idx})" data-idx="${idx}">
+                <div class="checkbox"></div>
+                <span class="place-emoji">📍</span>
+                <span class="place-name">${tempat.nama}</span>
+            </div>
+        `).join('');
+    }
+    
+    grid.innerHTML = html;
+};
+
+// Override resetAll untuk reset tempat manual
+const originalResetAll = resetAll;
+resetAll = function() {
+    state = {
+        lokasi: null,
+        jamMulai: null,
+        jamSelesai: null,
+        weatherContext: null,
+        cuacaList: [],
+        daftarTempat: [],
+        tempatDipilih: [],
+        exclude: [],
+        tempatManual: []
+    };
+    
+    hideElement('step-places');
+    hideElement('step-result');
+    showElement('step-input');
+    document.getElementById('input-lokasi').value = '';
+    document.getElementById('tempat-manual-list').innerHTML = '';
+};
+
 // Enter key support
 document.addEventListener('DOMContentLoaded', () => {
     const input = document.getElementById('input-lokasi');
@@ -303,6 +471,16 @@ document.addEventListener('DOMContentLoaded', () => {
         input.addEventListener('keypress', (e) => {
             if (e.key === 'Enter') {
                 cariTempat();
+            }
+        });
+    }
+    
+    // Enter key support untuk input maps link
+    const mapsInput = document.getElementById('input-maps-link');
+    if (mapsInput) {
+        mapsInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                tambahTempatManual();
             }
         });
     }

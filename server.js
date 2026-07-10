@@ -5,7 +5,9 @@ const {
     parseJam,
     ambilCuaca,
     generateDaftarTempat,
-    generateRundownData
+    generateRundownData,
+    processGoogleMapsUrl,
+    isGoogleMapsUrl
 } = require("./planner");
 
 const app = express();
@@ -56,6 +58,31 @@ app.post("/api/rundown", async (req, res) => {
     } catch (err) {
         console.error(err);
         return res.status(500).json({ error: "Gagal menyusun rundown." });
+    }
+});
+
+// Parse Google Maps URL menjadi info tempat
+app.post("/api/parse-maps", async (req, res) => {
+    try {
+        const { url } = req.body || {};
+        if (!url || !String(url).trim()) {
+            return res.status(400).json({ error: "Link Google Maps wajib diisi." });
+        }
+
+        const cleanUrl = String(url).trim();
+        if (!isGoogleMapsUrl(cleanUrl)) {
+            return res.status(400).json({ error: "Link tidak terdeteksi sebagai Google Maps." });
+        }
+
+        const tempat = await processGoogleMapsUrl(cleanUrl);
+        if (!tempat) {
+            return res.status(400).json({ error: "Gagal membaca link Google Maps. Coba link lain." });
+        }
+
+        return res.json(tempat);
+    } catch (err) {
+        console.error(err);
+        return res.status(500).json({ error: "Gagal memproses link Google Maps." });
     }
 });
 

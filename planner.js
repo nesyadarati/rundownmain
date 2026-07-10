@@ -170,6 +170,124 @@ Balas HANYA dengan JSON valid (tanpa teks lain, tanpa markdown fence) dengan str
     return extractJson(raw);
 }
 
+// Parse Google Maps URL untuk extract nama tempat dan koordinat
+function parseGoogleMapsUrl(url) {
+    const result = { nama: null, lat: null, lng: null, placeId: null };
+    
+    try {
+        // Extract coordinates dari URL: @lat,lng,zoom
+        const coordMatch = url.match(/@(-?\d+\.\d+),(-?\d+\.\d+)/);
+        if (coordMatch) {
+            result.lat = parseFloat(coordMatch[1]);
+            result.lng = parseFloat(coordMatch[2]);
+        }
+        
+        // Extract place ID: !1sPLACE_ID atau place_id=PLACE_ID
+        const placeIdMatch = url.match(/place_id[=:]([a-zA-Z0-9_]+)/) || url.match(/!1s([a-zA-Z0-9_]+)/);
+        if (placeIdMatch) {
+            result.placeId = placeIdMatch[1];
+        }
+        
+        // Extract nama tempat dari path URL
+        // Format: /place/NAMA_PLACE/ atau /maps/place/NAMA_PLACE/
+        const pathMatch = url.match(/\/place\/([^/]+)/) || url.match(/\/maps\/place\/([^/]+)/);
+        if (pathMatch) {
+            result.nama = decodeURIComponent(pathMatch[1].replace(/\+/g, ' ')).replace(/_/g, ' ');
+        }
+        
+        // Extract dari query parameter q= atau query=
+        const queryMatch = url.match(/[?&]q=([^&]+)/) || url.match(/[?&]query=([^&]+)/);
+        if (queryMatch && !result.nama) {
+            result.nama = decodeURIComponent(queryMatch[1].replace(/\+/g, ' '));
+        }
+        
+        // Extract dari search query di URL maps
+        const searchMatch = url.match(/\/search\/([^/]+)/);
+        if (searchMatch && !result.nama) {
+            result.nama = decodeURIComponent(searchMatch[1].replace(/\+/g, ' '));
+        }
+        
+    } catch (e) {
+        console.error('Error parsing Google Maps URL:', e);
+    }
+    
+    return result;
+}
+
+// Cek apakah teks mengandung Google Maps URL
+function isGoogleMapsUrl(text) {
+    return /maps\.app\.goo\.gl|google\.com\/maps|goo\.gl\/maps/i.test(text);
+}
+
+// Resolve short URL (goo.gl/maps/...) ke full URL
+async function resolveShortUrl(shortUrl) {
+    try {
+        const response = await axios.get(shortUrl, {
+            maxRedirects: 5,
+            timeout: 10000,
+            validateStatus: (status) => status < 400
+        });
+        return response.request?.res?.responseUrl || shortUrl;
+    } catch (e) {
+        // Jika error karena redirect, coba ambil dari header Location
+        if (e.response?.headers?.location) {
+            return e.response.headers.location;
+        }
+        return shortUrl;
+    }
+}
+
+// Geocode koordinat ke nama tempat menggunakan WeatherAPI
+async function geocodeFromCoords(lat, lng) {
+    try {
+        const apiKey = process.env.WEATHER_API_KEY;
+        const res = await axios.get(
+            `http://api.weatherapi.com/v1/current.json?key=${apiKey}&q=${lat},${lng}&aqi=no`,
+            { timeout: 10000 }
+        );
+        return res.data.location?.name || `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
+    } catch (e) {
+        return `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
+    }
+}
+
+// Proses Google Maps URL menjadi info tempat yang lengkap
+async function processGoogleMapsUrl(url) {
+    let fullUrl = url;
+    
+    // Resolve short URL dulu
+    if (/goo\.gl\/maps|maps\.app\.goo\.gl/i.test(url)) {
+        fullUrl = await resolveShortUrl(url);
+    }
+    
+    const parsed = parseGoogleMapsUrl(fullUrl);
+    
+    // Jika ada nama dari URL, gunakan itu
+    if (parsed.nama) {
+        return {
+            nama: parsed.nama,
+            lat: parsed.lat,
+            lng: parsed.lng,
+            mapsUrl: fullUrl,
+            sumber: 'google_maps'
+        };
+    }
+    
+    // Jika ada koordinat, geocode ke nama tempat
+    if (parsed.lat && parsed.lng) {
+        const nama = await geocodeFromCoords(parsed.lat, parsed.lng);
+        return {
+            nama: nama,
+            lat: parsed.lat,
+            lng: parsed.lng,
+            mapsUrl: fullUrl,
+            sumber: 'google_maps'
+        };
+    }
+    
+    return null;
+}
+
 module.exports = {
     callGemini,
     extractJson,
@@ -177,5 +295,10 @@ module.exports = {
     parseJam,
     ambilCuaca,
     generateDaftarTempat,
-    generateRundownData
+    generateRundownData,
+    parseGoogleMapsUrl,
+    isGoogleMapsUrl,
+    resolveShortUrl,
+    geocodeFromCoords,
+    processGoogleMapsUrl
 };

@@ -5,7 +5,9 @@ const {
     parseJam,
     ambilCuaca,
     generateDaftarTempat,
-    generateRundownData
+    generateRundownData,
+    isGoogleMapsUrl,
+    processGoogleMapsUrl
 } = require("./planner");
 
 const bot = new Telegraf(process.env.BOT_TOKEN);
@@ -88,6 +90,60 @@ function getWeatherEmoji(kondisi) {
     if (k.includes('petir') || k.includes('thunder')) return '⛈️';
     if (k.includes('kabut') || k.includes('mist')) return '🌫️';
     return '🌤️';
+}
+
+// ==== Handle Google Maps link: tambah tempat manual ====
+async function handleGoogleMapsLink(ctx, url) {
+    await safeReply(ctx, "🔗 Oke, aku baca link Google Maps-nya dulu ya...");
+    
+    try {
+        const tempat = await processGoogleMapsUrl(url);
+        
+        if (!tempat) {
+            return safeReply(ctx, "❌ Gagal membaca link Google Maps. Coba link lain ya.");
+        }
+        
+        const state = userState[ctx.chat.id];
+        
+        // Jika user sudah punya sesi aktif, tambahkan tempat ini ke daftar
+        if (state && state.daftarTempat && state.daftarTempat.length) {
+            // Cek apakah tempat sudah ada di daftar
+            if (state.daftarTempat.includes(tempat.nama)) {
+                return safeReply(ctx, `ℹ️ *${tempat.nama}* sudah ada di daftar pilihan.`);
+            }
+            
+            // Tambahkan ke daftar tempat
+            state.daftarTempat.push(tempat.nama);
+            
+            let msg = `✅ *${tempat.nama}* berhasil ditambahkan ke daftar pilihan!\n\n`;
+            msg += `📍 Daftar sekarang (${state.daftarTempat.length} tempat):\n`;
+            const placeEmojis = ['🏛️', '🍽️', '☕', '🌳', '🎨', '🎭', '🏖️', '🛍️', '🎪', '🏯'];
+            state.daftarTempat.forEach((t, i) => {
+                msg += `  ${placeEmojis[i % 10]} *${i + 1}.* ${t}\n`;
+            });
+            msg += `\n💡 Balas nomor untuk memilih, atau kirim link Maps lagi untuk tambah tempat lain.`;
+            
+            return safeReply(ctx, msg);
+        } else {
+            // Jika belum ada sesi, buat sesi baru dengan tempat ini
+            // Tapi kita butuh lokasi dan jam dulu, jadi minta info tambahan
+            let msg = `✅ Tempat terdeteksi: *${tempat.nama}*\n\n`;
+            msg += `📍 Untuk menyusun rencana, aku butuh info lokasi dan waktu dulu.\n`;
+            msg += `Contoh: \`cileungsi dari jam 12 siang sampe 8 malem\`\n\n`;
+            msg += `Nanti *${tempat.nama}* akan otomatis masuk ke daftar pilihan.`;
+            
+            // Simpan tempat manual untuk digunakan nanti
+            userState[ctx.chat.id] = {
+                ...userState[ctx.chat.id],
+                tempatManual: [tempat.nama]
+            };
+            
+            return safeReply(ctx, msg);
+        }
+    } catch (err) {
+        console.error(err);
+        return safeReply(ctx, "❌ Gagal memproses link Google Maps. Coba lagi ya.");
+    }
 }
 
 // ==== Langkah 1: user minta lokasi (via /main ATAU langsung ketik lokasinya) ====
@@ -187,6 +243,11 @@ bot.on("text", async (ctx) => {
 
     const text = raw.toLowerCase();
     const state = userState[ctx.chat.id];
+
+    // Cek apakah user mengirim link Google Maps
+    if (isGoogleMapsUrl(raw)) {
+        return handleGoogleMapsLink(ctx, raw);
+    }
 
     // Affirmasi / basa-basi
     if (/^(oke|ok|okay|sip|mantap|makasih|terima kasih|thanks|thank you|gas|siap|cukup)\b/.test(text)) {

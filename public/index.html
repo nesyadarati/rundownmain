@@ -48,6 +48,21 @@
                     <p id="places-subtitle" style="color:var(--text-secondary);font-size:.9rem;margin-top:4px"></p>
                 </div>
             </div>
+            
+            <!-- Custom Place Input -->
+            <div class="custom-place-section" style="margin-bottom:1.5rem;padding:1rem;background:var(--bg-secondary);border-radius:12px;border:1px solid var(--border);">
+                <label style="font-size:.9rem;font-weight:600;margin-bottom:.5rem;display:block;">📍 Tambah Tempat Manual</label>
+                <div style="display:flex;gap:.5rem;">
+                    <input type="text" id="input-maps-link" placeholder="Paste link Google Maps di sini..." style="flex:1;padding:.75rem;border-radius:8px;border:1px solid var(--border);background:var(--bg-primary);color:var(--text-primary);font-size:.9rem;">
+                    <button class="btn btn-secondary" id="btn-tambah-tempat" onclick="tambahTempatManual()" style="white-space:nowrap;">
+                        <span id="btn-tambah-tempat-text">+ Tambah</span>
+                        <div id="btn-tambah-tempat-spinner" class="spinner hidden"></div>
+                    </button>
+                </div>
+                <div id="error-maps" class="error-box hidden" style="margin-top:.5rem;font-size:.85rem;"></div>
+                <div id="tempat-manual-list" style="margin-top:.75rem;"></div>
+            </div>
+            
             <div id="places-grid" class="places-grid"></div>
             <div class="actions">
                 <button class="btn btn-primary" id="btn-susun" onclick="susunRundown()">
