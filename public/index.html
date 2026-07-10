@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Rundown Main — Day Trip Planner</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="bg-gradient"></div>
+
+    <header class="header">
+        <div class="header-badge">Day Trip Planner</div>
+        <h1>🗺️ Rundown Main</h1>
+        <p>Rencana perjalanan harian cerdas dengan prediksi cuaca real-time</p>
+    </header>
+
+    <div class="container">
+        <!-- Step 1: Input -->
+        <div id="step-input" class="card fade-in">
+            <div class="card-header">
+                <div class="card-icon">📍</div>
+                <div class="card-title">Mau main di mana?</div>
+            </div>
+            <div class="input-group">
+                <label>Lokasi & Waktu</label>
+                <div class="input-wrapper">
+                    <span class="icon">🏙️</span>
+                    <input type="text" id="input-lokasi" placeholder="contoh: cileungsi dari jam 12 siang sampe 8 malem" autocomplete="off">
+                </div>
+            </div>
+            <button class="btn btn-primary" id="btn-cari" onclick="cariTempat()">
+                <span id="btn-cari-text">🔍 Cari Tempat</span>
+                <div id="btn-cari-spinner" class="spinner hidden"></div>
+            </button>
+            <div id="error-input" class="error-box hidden" style="margin-top:1rem"></div>
+        </div>
+
+        <!-- Step 2: Pilih Tempat -->
+        <div id="step-places" class="card hidden">
+            <div class="card-header">
+                <div class="card-icon">🎯</div>
+                <div>
+                    <div class="card-title">Pilih Tempat</div>
+                    <p id="places-subtitle" style="color:var(--text-secondary);font-size:.9rem;margin-top:4px"></p>
+                </div>
+            </div>
+            <div id="places-grid" class="places-grid"></div>
+            <div class="actions">
+                <button class="btn btn-primary" id="btn-susun" onclick="susunRundown()">
+                    <span id="btn-susun-text">📝 Susun Rundown</span>
+                    <div id="btn-susun-spinner" class="spinner hidden"></div>
+                </button>
+                <button class="btn btn-secondary" onclick="cariTempat(true)">🔄 Tempat Lain</button>
+                <button class="btn btn-secondary" onclick="resetAll()">↩️ Ubah Lokasi</button>
+            </div>
+        </div>
+
+        <!-- Step 3: Hasil Rundown -->
+        <div id="step-result" class="card hidden">
+            <div class="rundown-header">
+                <h2 id="result-title"></h2>
+                <p id="result-subtitle"></p>
+            </div>
+            <div id="result-recs" class="rec-list"></div>
+            <div id="result-timeline" class="timeline" style="margin-top:2rem"></div>
+            <div id="result-weather-section" style="margin-top:2rem">
+                <h3 style="font-size:1.1rem;font-weight:600;margin-bottom:.5rem">🌤️ Info Cuaca</h3>
+                <div id="result-weather" class="weather-grid"></div>
+            </div>
+            <div id="result-conclusion" class="conclusion-box hidden"></div>
+            <div class="actions" style="margin-top:2rem">
+                <button class="btn btn-secondary" onclick="rombakRundown()">🔄 Rombak (Hindari Hujan)</button>
+                <button class="btn btn-secondary" onclick="goToPlaces()">↩️ Ganti Tempat</button>
+                <button class="btn btn-primary" onclick="resetAll()">🗺️ Rencana Baru</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
